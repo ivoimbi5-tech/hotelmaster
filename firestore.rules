@@ -1,0 +1,111 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Hardened Global Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.email == 'ivopacavira6@gmail.com';
+    }
+
+    function isStaff() {
+      return isSignedIn() && (
+        isAdmin() || 
+        exists(/databases/$(database)/documents/staff/$(request.auth.token.email))
+      );
+    }
+
+    // --- Validation Blueprints ---
+
+    function isValidRoom(data) {
+      return data.keys().hasAll(['number', 'type', 'pricePerHour', 'status'])
+        && data.number is string && data.number.size() <= 10
+        && data.type is string && data.type.size() <= 50
+        && data.pricePerHour is number && data.pricePerHour >= 0
+        && data.status in ['available', 'occupied', 'cleaning', 'maintenance'];
+    }
+
+    function isValidBooking(data) {
+      return data.keys().hasAll(['roomId', 'guestId', 'guestName', 'guestPhone', 'checkInTime', 'cardId', 'status', 'reservationDeposit'])
+        && data.roomId is string
+        && data.guestId is string
+        && data.status in ['active', 'completed']
+        && data.reservationDeposit is number;
+    }
+
+    function isValidReservation(data) {
+      return data.keys().hasAll(['roomId', 'guestName', 'guestPhone', 'arrivalTime', 'depositPaid', 'status', 'createdAt'])
+        && data.roomId is string
+        && data.depositPaid is number
+        && data.status in ['pending', 'confirmed', 'checked-in', 'expired', 'cancelled'];
+    }
+
+    // --- Collection Rules ---
+
+    match /rooms/{roomId} {
+      allow read: if true;
+      allow create: if isAdmin() && isValidRoom(incoming());
+      allow update: if (isStaff() && isValidRoom(incoming()) && (
+        (incoming().diff(existing()).affectedKeys().hasOnly(['status', 'currentBookingId'])) ||
+        isAdmin()
+      ));
+      allow delete: if isAdmin();
+    }
+
+    match /bookings/{bookingId} {
+      allow read: if isStaff();
+      allow create: if isStaff() && isValidBooking(incoming());
+      allow update: if isStaff() && isValidBooking(incoming()) && (
+        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'checkOutTime', 'totalHours', 'totalAmount', 'checkInTime', 'cardId', 'guestId', 'guestName', 'guestPhone', 'roomId', 'reservationDeposit'])
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /guests/{guestId} {
+      allow read: if isStaff();
+      allow create, update: if isStaff();
+      allow delete: if isAdmin();
+    }
+
+    match /reservations/{reservationId} {
+      allow read: if true;
+      allow create: if isValidReservation(incoming());
+      allow update: if (
+        (
+          existing().status == 'confirmed' && 
+          incoming().status == 'expired' &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['status'])
+        ) ||
+        (isStaff() && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['status'])
+        ))
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /staff/{staffEmail} {
+      allow get: if true;
+      allow list: if isSignedIn();
+      allow write: if isAdmin();
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Hotel Master - Gestão de Vagas",
+  "description": "Sistema intuitivo para recepção de hotéis com controle de ocupação, cadastro rápido via simulação de RFID e faturamento por hora.",
+  "requestFramePermissions": ["serial", "usb", "hid"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
